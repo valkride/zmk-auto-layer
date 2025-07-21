@@ -38,6 +38,9 @@ struct zmk_key_param {
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
 
+// Forward declaration
+static void timeout_handler(struct k_work *work);
+
 #define ZMK_BHV_AUTO_LAYER_MAX_ACTIVE 10
 
 struct key_list {
