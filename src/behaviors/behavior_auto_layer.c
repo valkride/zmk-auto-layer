@@ -9,6 +9,7 @@
 #include <zephyr/device.h>
 #include <drivers/behavior.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/kernel.h>
 #include <zmk/behavior.h>
 
 #include <zmk/endpoints.h>
@@ -49,12 +50,14 @@ struct behavior_auto_layer_config {
     bool ignore_alphas;
     bool ignore_numbers;
     bool ignore_modifiers;
+    int timeout_ms;
 };
 
 struct active_auto_layer {
     bool is_active;
     uint8_t layer;
     const struct behavior_auto_layer_config *config;
+    struct k_work_delayable timeout_work;
 };
 
 struct active_auto_layer active_auto_layers[ZMK_BHV_AUTO_LAYER_MAX_ACTIVE] = {};
@@ -76,6 +79,7 @@ static int new_auto_layer(uint8_t layer, const struct behavior_auto_layer_config
             ref_auto_layer->is_active = true;
             ref_auto_layer->layer = layer;
             ref_auto_layer->config = config;
+            k_work_init_delayable(&ref_auto_layer->timeout_work, timeout_handler);
             *auto_layer = ref_auto_layer;
             return 0;
         }
@@ -85,6 +89,14 @@ static int new_auto_layer(uint8_t layer, const struct behavior_auto_layer_config
 
 static void clear_auto_layer(struct active_auto_layer *auto_layer) {
     auto_layer->is_active = false;
+    k_work_cancel_delayable(&auto_layer->timeout_work);
+}
+
+static void timeout_handler(struct k_work *work) {
+    struct active_auto_layer *auto_layer = CONTAINER_OF(work, struct active_auto_layer, timeout_work.work);
+    if (auto_layer->is_active) {
+        deactivate_auto_layer(auto_layer);
+    }
 }
 
 static void activate_auto_layer(struct active_auto_layer *auto_layer) {
@@ -94,11 +106,17 @@ static void activate_auto_layer(struct active_auto_layer *auto_layer) {
 #else
     zmk_keymap_layer_activate(auto_layer->layer);
 #endif // IS_ENABLED(CONFIG_ZMK_TRACK_MOMENTARY_LAYERS)
+
+    // Start timeout if configured
+    if (auto_layer->config->timeout_ms > 0) {
+        k_work_schedule(&auto_layer->timeout_work, K_MSEC(auto_layer->config->timeout_ms));
+    }
 }
 
 static void deactivate_auto_layer(struct active_auto_layer *auto_layer) {
     zmk_keymap_layer_deactivate(auto_layer->layer);
     auto_layer->is_active = false;
+    k_work_cancel_delayable(&auto_layer->timeout_work);
 }
 
 static int on_auto_layer_binding_pressed(struct zmk_behavior_binding *binding,
@@ -243,6 +261,7 @@ static int behavior_auto_layer_init(const struct device *dev) {
         .ignore_alphas = DT_INST_PROP(n, ignore_alphas),                                           \
         .ignore_numbers = DT_INST_PROP(n, ignore_numbers),                                         \
         .ignore_modifiers = DT_INST_PROP(n, ignore_modifiers),                                     \
+        .timeout_ms = DT_INST_PROP_OR(n, timeout_ms, 0),                                           \
     };                                                                                             \
     BEHAVIOR_DT_INST_DEFINE(n, behavior_auto_layer_init, NULL, NULL,                               \
                             &behavior_auto_layer_config_##n, POST_KERNEL,                          \

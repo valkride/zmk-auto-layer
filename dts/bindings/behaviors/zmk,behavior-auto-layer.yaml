@@ -24,3 +24,6 @@ properties:
   ignore-modifiers:
     type: boolean
     description: Continue auto layer behavior for all modifiers.
+  timeout-ms:
+    type: int
+    description: Timeout in milliseconds after which the layer will be deactivated automatically.
